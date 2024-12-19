@@ -16,14 +16,15 @@ The Stock Portfolio Optimizer and Performance Tracker is designed to help invest
 ## Features
 - **Portfolio Optimization**: Uses quantitative methods to suggest the best portfolio composition.
 - **Performance Tracking**: Monitors and reports on the performance of the portfolio.
-- **Data Analysis**: Provides detailed analysis of stock data and market trends.
-- **Customizable Parameters**: Allows users to customize analysis parameters to fit their investment strategy.
 
 ## Installation
-To install and run the project locally:
-```shell
-git clone https://github.com/nguyentanquocbao/stock_quant
-```
+To set up the environment to run all of the notebooks, follow these steps:
+
+1. **Clone the repository**:
+   ```sh
+   git clone https://github.com/nguyentanquocbao/stock_quant.git
+   cd stock_quant
+
 ## Usage
 - **Use** market_analysis notebook file to get time-series analyses in Vietnamese stock market: including trend analysis, winsorize, stationary test, and simple visualization by SMA, EMA, cumulative log return, and simple AR & ARIMA visualization
 - **Use** update_data.py to get update and pre-processing data
