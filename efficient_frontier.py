@@ -21,253 +21,143 @@ Dependencies:
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 
 
-def plot_efficient_frontier(
-    returns_df: pd.DataFrame, market_value_df, n_portfolios=1000, risk_free_rate=0.02
+def efficient_frontier(
+    returns: pd.DataFrame, num_portfolios: int = 100, risk_free_rate: float = 0.01, range0=(0, 1)
 ):
     """
-    Plot the efficient frontier including market portfolio point.
+    Calculate the efficient frontier using scipy.minimize
 
     Parameters:
-    returns_df (pd.DataFrame): DataFrame of asset returns
-    market_value_df (pd.DataFrame): DataFrame of market values for each asset over time
-    n_portfolios (int): Number of portfolios to simulate
+    returns (DataFrame): DataFrame of asset returns
+    num_portfolios (int): Number of portfolios to generate
     risk_free_rate (float): Risk-free rate for Sharpe Ratio calculation
 
     Returns:
-    Plot of the efficient frontier with market portfolio
+    tuple: (results_array, optimal_sharpe_portfolio)
     """
 
-    # Calculate mean returns and covariance matrix
-    mean_returns = returns_df.mean()
-    cov_matrix = returns_df.cov()
-
-    # Calculate market portfolio weights based on average market values
-    avg_market_values = market_value_df.mean()
-    market_weights = avg_market_values / avg_market_values.sum()
-
-    # Calculate market portfolio return and volatility
-    market_return = np.sum(mean_returns * market_weights) * 252  # Annualized return
-    market_std = np.sqrt(np.dot(market_weights.T, np.dot(cov_matrix * 252, market_weights)))
-    market_sharpe = (market_return - risk_free_rate) / market_std
-
-    # Lists to store returns, volatility and weights of portfolios
-    returns_array = []
-    volatility_array = []
-    weights_array = []
-    sharpe_array = []
-
-    # Generate random portfolios
-    for _ in range(n_portfolios):
-        weights = np.random.random(len(returns_df.columns))
-        weights = weights / np.sum(weights)
-
-        portfolio_return = np.sum(mean_returns * weights) * 252
-        portfolio_std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix * 252, weights)))
+    def portfolio_statistics(weights, returns):
+        """Calculate portfolio statistics (return, volatility, Sharpe ratio)"""
+        portfolio_return = returns.multiply(weights, axis=1).sum(axis=1)[-1]
+        portfolio_std = returns.multiply(weights, axis=1).sum(axis=1).std()
         sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
+        return portfolio_return, portfolio_std, sharpe_ratio
 
-        returns_array.append(portfolio_return)
-        volatility_array.append(portfolio_std)
-        weights_array.append(weights)
-        sharpe_array.append(sharpe_ratio)
+    def minimize_volatility(weights):
+        """Objective function to minimize volatility"""
+        return portfolio_statistics(weights, returns)[1]
 
-    # Convert to numpy arrays
-    returns_array = np.array(returns_array)
-    volatility_array = np.array(volatility_array)
-    sharpe_array = np.array(sharpe_array)
+    def minimize_negative_sharpe(weights):
+        """Objective function to maximize Sharpe ratio"""
+        return -portfolio_statistics(weights, returns)[2]
 
-    # Find portfolio with highest Sharpe Ratio
-    max_sharpe_idx = np.argmax(sharpe_array)
-    max_sharpe_return = returns_array[max_sharpe_idx]
-    max_sharpe_volatility = volatility_array[max_sharpe_idx]
+    returns = (1 + returns).cumprod()
+    # Constraints
+    num_assets = len(returns.columns)
+    constraints = {"type": "eq", "fun": lambda x: np.sum(x) - 1}  # weights sum to 1
+    bounds = tuple(range0 for _ in range(num_assets))  # weights between 0 and 1
 
-    # Find portfolio with minimum volatility
-    min_vol_idx = np.argmin(volatility_array)
-    min_vol_return = returns_array[min_vol_idx]
-    min_vol_volatility = volatility_array[min_vol_idx]
+    # Initial guess (equal weights)
+    init_weights = np.array([1 / num_assets] * num_assets)
 
-    # Plot efficient frontier
-    plt.figure(figsize=(12, 8))
-    scatter = plt.scatter(
-        volatility_array, returns_array, c=sharpe_array, cmap="viridis", marker="o", s=10, alpha=0.3
+    # Find portfolio with maximum Sharpe ratio
+    optimal_sharpe = minimize(
+        minimize_negative_sharpe,
+        init_weights,
+        method="SLSQP",
+        bounds=bounds,
+        constraints=constraints,
     )
 
-    # Plot maximum Sharpe ratio portfolio
+    # Calculate efficient frontier
+    target_returns = np.linspace(returns.mean().min(), returns.mean().max(), num_portfolios)
+
+    efficient_portfolios = []
+
+    for target in target_returns:
+        # Additional constraint for target return
+        constraints = (
+            {"type": "eq", "fun": lambda x: np.sum(x) - 1},
+            {
+                "type": "eq",
+                "fun": lambda x, target=target: portfolio_statistics(x, returns)[0] - target,
+            },
+        )
+
+        result = minimize(
+            minimize_volatility,
+            init_weights,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+        )
+
+        if result.success:
+            return_val, std_val, sharpe_val = portfolio_statistics(result.x, returns)
+            efficient_portfolios.append([return_val, std_val, sharpe_val] + list(result.x))
+
+    # Convert results to array
+    results_array = np.array(efficient_portfolios)
+    plt.figure(figsize=(10, 6))
+    max_sharpe_idx = np.argmax(results_array[:, 2])  # column 2 contains Sharpe ratios
+    max_sharpe_portfolio = results_array[max_sharpe_idx]
+
+    # Find min Sharpe ratio portfolio
+    min_sharpe_idx = np.argmin(results_array[:, 2])
+    min_sharpe_portfolio = results_array[min_sharpe_idx]
+
+    # Create the scatter plot (existing code)
     plt.scatter(
-        max_sharpe_volatility,
-        max_sharpe_return,
+        results_array[:, 1],
+        results_array[:, 0],
+        c=results_array[:, 2],
+        cmap="viridis",
+        marker="o",
+        s=10,
+        alpha=0.3,
+    )
+
+    # Add max Sharpe point
+    plt.scatter(
+        max_sharpe_portfolio[1],
+        max_sharpe_portfolio[0],
         color="red",
         marker="*",
         s=200,
         label="Maximum Sharpe ratio",
     )
 
-    # Plot minimum volatility portfolio
+    # Add min Sharpe point
     plt.scatter(
-        min_vol_volatility,
-        min_vol_return,
-        color="green",
+        min_sharpe_portfolio[1],
+        min_sharpe_portfolio[0],
+        color="yellow",
         marker="*",
         s=200,
-        label="Minimum volatility",
+        label="Minimum Sharpe ratio",
     )
 
-    # Plot market portfolio
-    plt.scatter(
-        market_std, market_return, color="blue", marker="*", s=200, label="Market portfolio"
-    )
-
-    plt.colorbar(scatter, label="Sharpe ratio")
-    plt.xlabel("Expected Volatility")
-    plt.ylabel("Expected Return")
-    plt.title("Efficient Frontier with Market Portfolio")
+    plt.colorbar(label="Sharpe ratio")
+    plt.xlabel("Volatility")
+    plt.ylabel("Return")
+    plt.title("Efficient Frontier")
     plt.legend()
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.show()
 
-    return {
-        "Maximum Sharpe Ratio Portfolio": {
-            "Return": max_sharpe_return,
-            "Volatility": max_sharpe_volatility,
-            "Sharpe Ratio": sharpe_array[max_sharpe_idx],
-            "Weights": dict(zip(returns_df.columns, weights_array[max_sharpe_idx])),
+    # Add portfolio composition text
+    portfolio_metrics = {
+        "Maximum Sharpe": {
+            "Return": max_sharpe_portfolio[0],
+            "Volatility": max_sharpe_portfolio[1],
+            "Weights": dict(zip(returns.columns, max_sharpe_portfolio[3:])),
         },
-        "Minimum Volatility Portfolio": {
-            "Return": min_vol_return,
-            "Volatility": min_vol_volatility,
-            "Sharpe Ratio": sharpe_array[min_vol_idx],
-            "Weights": dict(zip(returns_df.columns, weights_array[min_vol_idx])),
-        },
-        "Market Portfolio": {
-            "Return": market_return,
-            "Volatility": market_std,
-            "Sharpe Ratio": market_sharpe,
-            "Weights": dict(zip(returns_df.columns, market_weights)),
+        "Minimum Sharpe": {
+            "Return": min_sharpe_portfolio[0],
+            "Volatility": min_sharpe_portfolio[1],
+            "Weights": dict(zip(returns.columns, min_sharpe_portfolio[3:])),
         },
     }
 
-
-def plot_efficient_frontier_log_cum(
-    returns_df, market_value_df, n_portfolios=1000, risk_free_rate=0.02
-):
-    """
-    Plot the efficient frontier using cumulative returns.
-
-    Parameters:
-    returns_df (pd.DataFrame): DataFrame of asset returns
-    market_value_df (pd.DataFrame): DataFrame of market values for each asset over time
-    n_portfolios (int): Number of portfolios to simulate
-    risk_free_rate (float): Risk-free rate for Sharpe Ratio calculation
-
-    Returns:
-    Plot of the efficient frontier with market portfolio
-    """
-
-    # Calculate cumulative returns
-    cum_returns = (1 + returns_df).cumprod()
-    # cov_matrix = np.log(1 + returns_df).cov()
-    avg_market_values = market_value_df.mean()
-    market_weights = avg_market_values / avg_market_values.sum()
-    market_return = cum_returns.copy()
-    market_return = cum_returns.multiply(market_weights, axis=1)
-    market_return = market_return[-1]
-    market_std = market_return.std()
-    market_return = market_return.sum()
-    market_sharpe = (market_return - risk_free_rate) / market_std
-    returns_array = []
-    volatility_array = []
-    weights_array = []
-    sharpe_array = []
-
-    # Generate random portfolios
-    for _ in range(n_portfolios):
-        weights = np.random.random(len(returns_df.columns))
-        weights = weights / np.sum(weights)
-        portfolio_return = cum_returns.multiply(weights, axis=1).mean(
-            axis=1
-        )  # cummulative-porfolio return each trading day
-        portfolio_std = portfolio_return.std()
-        portfolio_return = (
-            portfolio_return.sum()
-        )  # because we used log-return then we just sum all cummulative return as the last return
-        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
-        returns_array.append(portfolio_return)
-        volatility_array.append(portfolio_std)
-        weights_array.append(weights)
-        sharpe_array.append(sharpe_ratio)
-
-    # Convert to numpy arrays
-    returns_array = np.array(returns_array)
-    volatility_array = np.array(volatility_array)
-    sharpe_array = np.array(sharpe_array)
-
-    # Find portfolio with highest Sharpe Ratio
-    max_sharpe_idx = np.argmax(sharpe_array)
-    max_sharpe_return = returns_array[max_sharpe_idx]
-    max_sharpe_volatility = volatility_array[max_sharpe_idx]
-
-    # Find portfolio with minimum volatility
-    min_vol_idx = np.argmin(volatility_array)
-    min_vol_return = returns_array[min_vol_idx]
-    min_vol_volatility = volatility_array[min_vol_idx]
-
-    # Plot efficient frontier
-    plt.figure(figsize=(12, 8))
-    scatter = plt.scatter(
-        volatility_array, returns_array, c=sharpe_array, cmap="viridis", marker="o", s=10, alpha=0.3
-    )
-
-    # Plot maximum Sharpe ratio portfolio
-    plt.scatter(
-        max_sharpe_volatility,
-        max_sharpe_return,
-        color="red",
-        marker="*",
-        s=200,
-        label="Maximum Sharpe ratio",
-    )
-
-    # Plot minimum volatility portfolio
-    plt.scatter(
-        min_vol_volatility,
-        min_vol_return,
-        color="green",
-        marker="*",
-        s=200,
-        label="Minimum volatility",
-    )
-
-    # Plot market portfolio
-    plt.scatter(
-        market_std, market_return, color="blue", marker="*", s=200, label="Market portfolio"
-    )
-
-    plt.colorbar(scatter, label="Sharpe ratio")
-    plt.xlabel("Expected Volatility")
-    plt.ylabel("Expected Cumulative Return")
-    plt.title("Efficient Frontier with Market Portfolio (Using Cumulative Returns)")
-    plt.legend()
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.show()
-
-    return {
-        "Maximum Sharpe Ratio Portfolio": {
-            "Return": max_sharpe_return,
-            "Volatility": max_sharpe_volatility,
-            "Sharpe Ratio": sharpe_array[max_sharpe_idx],
-            "Weights": dict(zip(returns_df.columns, weights_array[max_sharpe_idx])),
-        },
-        "Minimum Volatility Portfolio": {
-            "Return": min_vol_return,
-            "Volatility": min_vol_volatility,
-            "Sharpe Ratio": sharpe_array[min_vol_idx],
-            "Weights": dict(zip(returns_df.columns, weights_array[min_vol_idx])),
-        },
-        "Market Portfolio": {
-            "Return": market_return,
-            "Volatility": market_std,
-            "Sharpe Ratio": market_sharpe,
-            "Weights": dict(zip(returns_df.columns, market_weights)),
-        },
-    }
+    return portfolio_metrics
