@@ -1,0 +1,35 @@
+{
+    "URL_IMF": "http://dataservices.imf.org/REST/SDMX_JSON.svc/",
+    "DATA": {
+        "CPI": [
+            "PCPI_IX",
+            {
+                "@BASE_YEAR": "base_year"
+            }
+        ],
+        "EXCHANGE_RATE": [
+            "ENDE_XDC_USD_RATE"
+        ],
+        "EXPORT": [
+            "TXG_FOB_USD"
+        ],
+        "IMPORT": [
+            "TMG_CIF_USD"
+        ],
+        "INTEREST_LENDING": [
+            "FILR_PA"
+        ],
+        "INTEREST_BENCHMARK": [
+            "FPOLM_PA"
+        ],
+        "TREASURY_BILL_RATE": [
+            "FITB_PA"
+        ],
+        "GOV_BOND": [
+            "FIGB_PA"
+        ],
+        "UNEMPLOYMENT_RATE": [
+            "LU_PE_NUM"
+        ]
+    }
+}
