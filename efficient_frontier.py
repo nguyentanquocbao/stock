@@ -25,7 +25,11 @@ from scipy.optimize import minimize
 
 
 def efficient_frontier(
-    returns: pd.DataFrame, num_portfolios: int = 100, risk_free_rate: float = 0.01, range0=(0.01, 1)
+    returns: pd.DataFrame,
+    market_df: pd.DataFrame,
+    num_portfolios: int = 100,
+    risk_free_rate: float = 0.01,
+    range0=(0.01, 1),
 ):
     """
     Calculate the efficient frontier using scipy.minimize
@@ -42,28 +46,33 @@ def efficient_frontier(
 
     def portfolio_statistics(weights, returns):
         """Calculate portfolio statistics (return, volatility, Sharpe ratio)"""
-        portfolio_return = (
-            returns.multiply(weights, axis=1).sum(axis=1).iloc[-1]
-        )  # Using iloc instead of [-1]
+        portfolio_return = (returns.multiply(weights, axis=1).sum(axis=1)).iloc[
+            -1
+        ]  # Using iloc instead of [-1]
         portfolio_std = returns.multiply(weights, axis=1).sum(axis=1).std()
         sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
         return portfolio_return, portfolio_std, sharpe_ratio
 
     def minimize_volatility(weights):
         """Objective function to minimize volatility"""
-        # Clip weights to ensure they stay within bounds
-        weights = np.clip(weights, range0[0], range0[1])
         return portfolio_statistics(weights, returns)[1]
 
     # def minimize_negative_sharpe(weights):
     #     """Objective function to maximize Sharpe ratio"""
     #     return -portfolio_statistics(weights, returns)[2]
+    total_market_value = market_df.groupby("time")["market_value"].transform("sum")
+    market_df["market_value"] = market_df["market_value"] / total_market_value
+    market_df["market_log_return"] = market_df["market_value"] * market_df["log_return"]
+    market_df = market_df.pivot_table(index="time", values="market_log_return", columns="ticker")
+    market_df = market_df.sum(axis=1).to_frame(name="market_log_return")
+    market_return = 1 + market_df.sum().iloc[0]
+    market_std = market_df.std().iloc[0]
 
     returns = (1 + returns).cumprod()
     # Constraints
     num_assets = len(returns.columns)
     constraints = {"type": "eq", "fun": lambda x: np.sum(x) - 1}  # weights sum to 1
-    bounds = tuple(range0 for _ in range(num_assets))  # weights between 0 and 1
+    bounds = tuple(range0 for _ in range(num_assets))  # weights between given range
 
     # Initial guess (equal weights)
     init_weights = np.array([1 / num_assets] * num_assets)
@@ -85,35 +94,37 @@ def efficient_frontier(
     for target in target_returns:
         # Additional constraint for target return
         constraints = (
-            {"type": "eq", "fun": lambda x: np.sum(np.clip(x, range0[0], range0[1])) - 1},
+            {"type": "eq", "fun": lambda x: np.sum(x) - 1},
             {
                 "type": "eq",
-                "fun": lambda x, target=target: portfolio_statistics(
-                    np.clip(x, range0[0], range0[1]), returns
-                )[0]
-                - target,
+                "fun": lambda x, target=target: portfolio_statistics(x, returns)[0] - target,
             },
         )
-
-        try:
-            result = minimize(
-                minimize_volatility,
-                init_weights,
-                method="SLSQP",
-                bounds=bounds,
-                constraints=constraints,
-                options={"ftol": 1e-9, "maxiter": 1000, "disp": False},  # Add optimization options
-            )
-        except ValueError:
-            print(f"Optimization failed for target return {target}: {'ValueError'}")
-            continue
+        result = minimize(
+            minimize_volatility,
+            init_weights,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+            options={"ftol": 1e-9, "maxiter": 1000, "disp": False},
+        )
 
         if result.success:
             return_val, std_val, sharpe_val = portfolio_statistics(result.x, returns)
             efficient_portfolios.append([return_val, std_val, sharpe_val] + list(result.x))
 
+    # Check if we have any valid portfolios
+
     # Convert results to array
     results_array = np.array(efficient_portfolios)
+
+    # Debug print
+    print(f"Results array shape: {results_array.shape}")
+
+    if len(results_array.shape) < 2:
+        print("Invalid results array shape!")
+        return None, None
+
     plt.figure(figsize=(10, 6))
     max_sharpe_idx = np.argmax(results_array[:, 2])  # column 2 contains Sharpe ratios
     max_sharpe_portfolio = results_array[max_sharpe_idx]
@@ -152,6 +163,15 @@ def efficient_frontier(
         s=200,
         label="Minimum Sharpe ratio",
     )
+    plt.scatter(
+        market_std,
+        market_return,
+        c=market_return / market_std,
+        cmap="viridis",
+        marker="o",
+        s=200,
+        label="market",
+    )
 
     plt.colorbar(label="Sharpe ratio")
     plt.xlabel("Volatility")
@@ -173,4 +193,4 @@ def efficient_frontier(
         },
     }
 
-    return portfolio_metrics
+    return portfolio_metrics, [market_return, market_std]
