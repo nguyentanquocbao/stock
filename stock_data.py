@@ -43,20 +43,32 @@ def clean_data(data: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: cleaned dataset
     """
-    data.loc[data["close"] == 0, "close"] = None
-    data["close"] = data.groupby("ticker")["close"].fillna(method="ffill")
-    data = data.dropna(subset="close")
-    data["market_value"] = data["close"] * data["total_outstanding"]
-    data["return"] = data["close"] / data.groupby("ticker")["close"].shift(1) - 1
-    data["log_return"] = np.log(data["close"] / data.groupby("ticker")["close"].shift(1))
-    data.sort_values(["ticker", "time"], inplace=True)
+    # Create a copy of the input data to avoid warnings
+    df = data.copy()
 
-    data["market_weight"] = data["market_value"] / data.groupby(["exchange", "time"])[
+    # Use loc for assignments
+    df.loc[df["close"] == 0, "close"] = None
+    df.loc[:, "close"] = df.groupby("ticker")["close"].ffill()
+    df = df.dropna(subset=["close"])
+
+    # Calculate market values and returns
+    df.loc[:, "market_value"] = df["close"] * df["total_outstanding"]
+    df.loc[:, "return"] = df["close"] / df.groupby("ticker")["close"].shift(1) - 1
+    df.loc[:, "log_return"] = np.log(df["close"] / df.groupby("ticker")["close"].shift(1))
+    df.sort_values(["ticker", "time"], inplace=True)
+
+    # Calculate market weights and weighted returns
+    df.loc[:, "market_weight"] = df["market_value"] / df.groupby(["exchange", "time"])[
         "market_value"
     ].transform("sum")
-    data["return_weighted"] = (data["market_weight"] * data["return"]).fillna(0)
-    data["log_return_weighted"] = (data["market_weight"] * data["log_return"]).fillna(0)
-    return data
+    df.loc[:, "return_weighted"] = df["market_weight"] * df["return"]
+    df.loc[:, "log_return_weighted"] = df["market_weight"] * df["log_return"]
+
+    # Fill NA values
+    df.loc[:, "return_weighted"] = df["return_weighted"].fillna(0)
+    df.loc[:, "log_return_weighted"] = df["log_return_weighted"].fillna(0)
+
+    return df
 
 
 @dataclass
@@ -213,7 +225,8 @@ class StockData:
                 .stock(symbol=ticker, source=self.dictionary["source"])
                 .quote.history(start=start_date, end=end_date, interval="1D")
             )
-            data["ticker"] = ticker
+            # data["ticker"] = ticker
+            data.loc[:, "ticker"] = ticker  # updated by me
             return data
         except ValueError:
             return pd.DataFrame()
@@ -236,35 +249,44 @@ class StockData:
             if latest_data_date.strftime("%Y-%m-%d") < get_past_friday():
                 latest_data_date = latest_data_date + pd.offsets.DateOffset(n=1)
                 print("update data")
-                all_ticker = Parallel(n_jobs=-15)(
-                    delayed(self.read_1_stock_data)(stock, get_past_friday())
-                    for stock in ticker[self.dictionary["ticker"]].unique()
+                all_ticker = pd.concat(
+                    Parallel(n_jobs=-15)(
+                        delayed(self.read_1_stock_data)(stock, get_past_friday())
+                        for stock in ticker[self.dictionary["ticker"]].unique()
+                    )
                 )
-                all_ticker = pd.concat(all_ticker)
                 all_ticker.to_parquet(path_temp)
             else:
                 all_ticker = data.copy()
         else:
             print("Downloading whole data set")
-            all_ticker = Parallel(n_jobs=-15)(
-                delayed(self.read_1_stock_data)(stock, get_past_friday())
-                for stock in ticker[self.dictionary["ticker"]].unique()
+            all_ticker = pd.concat(
+                Parallel(n_jobs=-15)(
+                    delayed(self.read_1_stock_data)(stock, get_past_friday())
+                    for stock in ticker[self.dictionary["ticker"]].unique()
+                )
             )
-            all_ticker = pd.concat(all_ticker)
             all_ticker.to_parquet(path_temp)
+
+        # Create a clean merge with explicit column selection
+        ticker_subset = ticker[
+            [
+                self.dictionary["ticker"],
+                "exchange",
+                "total_outstanding",
+            ]
+        ].copy()
+
         all_ticker = all_ticker.merge(
-            ticker[
-                [
-                    self.dictionary["ticker"],
-                    "exchange",
-                    "total_outstanding",
-                ]
-            ],
+            ticker_subset,
             how="inner",
             left_on=["ticker"],
             right_on=[self.dictionary["ticker"]],
-        )
-        return clean_data(all_ticker)
+        ).copy()
+
+        # Clean the merged dataframe
+        final_data = clean_data(all_ticker)
+        return final_data
 
     def concat_new_and_old(
         self,

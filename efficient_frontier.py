@@ -25,7 +25,7 @@ from scipy.optimize import minimize
 
 
 def efficient_frontier(
-    returns: pd.DataFrame, num_portfolios: int = 100, risk_free_rate: float = 0.01, range0=(0, 1)
+    returns: pd.DataFrame, num_portfolios: int = 100, risk_free_rate: float = 0.01, range0=(0.01, 1)
 ):
     """
     Calculate the efficient frontier using scipy.minimize
@@ -34,6 +34,7 @@ def efficient_frontier(
     returns (DataFrame): DataFrame of asset returns
     num_portfolios (int): Number of portfolios to generate
     risk_free_rate (float): Risk-free rate for Sharpe Ratio calculation
+    range0 (tuple): Range for portfolio weights, default (0.01, 1) to avoid division by zero
 
     Returns:
     tuple: (results_array, optimal_sharpe_portfolio)
@@ -41,18 +42,22 @@ def efficient_frontier(
 
     def portfolio_statistics(weights, returns):
         """Calculate portfolio statistics (return, volatility, Sharpe ratio)"""
-        portfolio_return = returns.multiply(weights, axis=1).sum(axis=1)[-1]
+        portfolio_return = (
+            returns.multiply(weights, axis=1).sum(axis=1).iloc[-1]
+        )  # Using iloc instead of [-1]
         portfolio_std = returns.multiply(weights, axis=1).sum(axis=1).std()
         sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std
         return portfolio_return, portfolio_std, sharpe_ratio
 
     def minimize_volatility(weights):
         """Objective function to minimize volatility"""
+        # Clip weights to ensure they stay within bounds
+        weights = np.clip(weights, range0[0], range0[1])
         return portfolio_statistics(weights, returns)[1]
 
-    def minimize_negative_sharpe(weights):
-        """Objective function to maximize Sharpe ratio"""
-        return -portfolio_statistics(weights, returns)[2]
+    # def minimize_negative_sharpe(weights):
+    #     """Objective function to maximize Sharpe ratio"""
+    #     return -portfolio_statistics(weights, returns)[2]
 
     returns = (1 + returns).cumprod()
     # Constraints
@@ -64,13 +69,13 @@ def efficient_frontier(
     init_weights = np.array([1 / num_assets] * num_assets)
 
     # Find portfolio with maximum Sharpe ratio
-    optimal_sharpe = minimize(
-        minimize_negative_sharpe,
-        init_weights,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-    )
+    # optimal_sharpe = minimize(
+    #     minimize_negative_sharpe,
+    #     init_weights,
+    #     method="SLSQP",
+    #     bounds=bounds,
+    #     constraints=constraints,
+    # )
 
     # Calculate efficient frontier
     target_returns = np.linspace(returns.mean().min(), returns.mean().max(), num_portfolios)
@@ -80,20 +85,28 @@ def efficient_frontier(
     for target in target_returns:
         # Additional constraint for target return
         constraints = (
-            {"type": "eq", "fun": lambda x: np.sum(x) - 1},
+            {"type": "eq", "fun": lambda x: np.sum(np.clip(x, range0[0], range0[1])) - 1},
             {
                 "type": "eq",
-                "fun": lambda x, target=target: portfolio_statistics(x, returns)[0] - target,
+                "fun": lambda x, target=target: portfolio_statistics(
+                    np.clip(x, range0[0], range0[1]), returns
+                )[0]
+                - target,
             },
         )
 
-        result = minimize(
-            minimize_volatility,
-            init_weights,
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-        )
+        try:
+            result = minimize(
+                minimize_volatility,
+                init_weights,
+                method="SLSQP",
+                bounds=bounds,
+                constraints=constraints,
+                options={"ftol": 1e-9, "maxiter": 1000, "disp": False},  # Add optimization options
+            )
+        except ValueError:
+            print(f"Optimization failed for target return {target}: {'ValueError'}")
+            continue
 
         if result.success:
             return_val, std_val, sharpe_val = portfolio_statistics(result.x, returns)
