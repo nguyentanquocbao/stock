@@ -18,10 +18,13 @@ Dependencies:
 - pandas
 """
 
+from typing import Dict
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+from joblib import Parallel, delayed
 
 
 def efficient_frontier(
@@ -57,17 +60,17 @@ def efficient_frontier(
         """Objective function to minimize volatility"""
         return portfolio_statistics(weights, returns)[1]
 
-    # def minimize_negative_sharpe(weights):
-    #     """Objective function to maximize Sharpe ratio"""
-    #     return -portfolio_statistics(weights, returns)[2]
+    # market computation
     total_market_value = market_df.groupby("time")["market_value"].transform("sum")
-    market_df["market_value"] = market_df["market_value"] / total_market_value
-    market_df["market_log_return"] = market_df["market_value"] * market_df["log_return"]
+    market_df["market_scale"] = market_df["market_value"] / total_market_value
+    market_df["market_log_return"] = market_df["market_scale"] * (market_df["log_return"] + 1)
     market_df = market_df.pivot_table(index="time", values="market_log_return", columns="ticker")
     market_df = market_df.sum(axis=1).to_frame(name="market_log_return")
-    market_return = 1 + market_df.sum().iloc[0]
-    market_std = market_df.std().iloc[0]
+    market_df = market_df.cumprod()
+    market_std = market_df.std()
+    market_return = market_df.iloc[-1]
 
+    # Porfolio computation
     returns = (1 + returns).cumprod()
     # Constraints
     num_assets = len(returns.columns)
@@ -87,12 +90,11 @@ def efficient_frontier(
     # )
 
     # Calculate efficient frontier
-    target_returns = np.linspace(returns.mean().min(), returns.mean().max(), num_portfolios)
+    target_returns = np.linspace(returns.min().min(), returns.max().max(), num_portfolios)
 
     efficient_portfolios = []
 
-    for target in target_returns:
-        # Additional constraint for target return
+    def compute_efficient_portfolio(target):
         constraints = (
             {"type": "eq", "fun": lambda x: np.sum(x) - 1},
             {
@@ -111,7 +113,18 @@ def efficient_frontier(
 
         if result.success:
             return_val, std_val, sharpe_val = portfolio_statistics(result.x, returns)
-            efficient_portfolios.append([return_val, std_val, sharpe_val] + list(result.x))
+            return [return_val, std_val, sharpe_val] + list(result.x)
+        else:
+            return None
+
+    efficient_portfolios = Parallel(n_jobs=-7)(
+        delayed(compute_efficient_portfolio)(target) for target in target_returns
+    )
+
+    # Filter out None results
+    efficient_portfolios = [
+        portfolio for portfolio in efficient_portfolios if portfolio is not None
+    ]
 
     # Check if we have any valid portfolios
 
@@ -194,3 +207,39 @@ def efficient_frontier(
     }
 
     return portfolio_metrics, [market_return, market_std]
+
+
+def plot_portfolio_weights(weights: Dict, title="Portfolio Weights"):
+    """
+    Plots the portfolio weights on a radar chart.
+    Parameters:
+    weights (pd.Series): A pandas Series containing the portfolio weights with asset names as the index.
+    title (str, optional): The title of the plot. Defaults to "Portfolio Weights".
+    Returns:
+    None: This function does not return any value. It displays a radar chart of the portfolio weights.
+    """
+    # Define the labels and number of variables
+
+    labels = list(weights.keys())
+    num_vars = len(labels)
+
+    # Compute angles for radar chart
+    angles = list(np.linspace(0, 2 * np.pi, num_vars, endpoint=False))
+
+    # Close the plot by appending first values
+    values = list(weights.values())
+    values += values[:1]
+    angles += angles[:1]
+
+    # Create the radar chart
+    _, ax = plt.subplots(figsize=(12, 8), subplot_kw=dict(polar=True))
+    ax.fill(angles, values, color="blue", alpha=0.25)
+    ax.plot(angles, values, color="blue", linewidth=2)
+
+    # Add labels
+    ax.set_yticklabels([])
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels)
+
+    plt.title(title)
+    plt.show()
