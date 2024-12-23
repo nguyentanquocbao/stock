@@ -74,7 +74,6 @@ def efficient_frontier(
     returns = (1 + returns).cumprod()
     # Constraints
     num_assets = len(returns.columns)
-    constraints = {"type": "eq", "fun": lambda x: np.sum(x) - 1}  # weights sum to 1
     bounds = tuple(range0 for _ in range(num_assets))  # weights between given range
 
     # Initial guess (equal weights)
@@ -213,10 +212,12 @@ def plot_portfolio_weights(weights: Dict, title="Portfolio Weights"):
     """
     Plots the portfolio weights on a radar chart.
     Parameters:
-    weights (pd.Series): A pandas Series containing the portfolio weights with asset names as the index.
+    weights (pd.Series): A pandas Series containing the portfolio weights
+        with asset names as the index.
     title (str, optional): The title of the plot. Defaults to "Portfolio Weights".
     Returns:
-    None: This function does not return any value. It displays a radar chart of the portfolio weights.
+    None: This function does not return any value.
+        It displays a radar chart of the portfolio weights.
     """
     # Define the labels and number of variables
 
