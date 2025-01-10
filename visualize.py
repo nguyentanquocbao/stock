@@ -1,4 +1,5 @@
-"""Market Visualization Module
+"""
+Market Visualization Module
 
 This module provides functionality for visualizing and analyzing market data across different
 exchanges. It includes tools for calculating and plotting various market statistics such as
@@ -33,7 +34,9 @@ Notes:
 
 import pandas as pd
 import numpy as np
+import seaborn as sns
 import matplotlib.pyplot as plt
+import statsmodels.api as sm
 
 
 class MarketVisualize:
@@ -101,6 +104,8 @@ class MarketVisualize:
             .groupby([self.market_data["exchange"], self.market_data["year"]])
             .cumprod()
         )
+        self.market_data["spread"] = self.market_data["high_weighted"] - self.market_data["low_weighted"]
+        self.market_data["spread_pct"] = self.market_data["spread"] / self.market_data["low_weighted"]
         summary = (
             self.market_data.groupby(["exchange", "year"])
             .agg(
@@ -118,106 +123,195 @@ class MarketVisualize:
             summary["cumu_log_return"] / summary["cumu_log_return_std"]
         )
         return summary
+    
 
     def plot_sharp_ratios(self):
         """
         Plot sharp ratios for each exchange over the years.
         """
         summary = self.summary
-        _, ax = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
-        exchanges = summary["exchange"].unique()
-        for exchange in exchanges:
-            exchange_data = summary[summary["exchange"] == exchange]
-            ax[0].plot(exchange_data["year"], exchange_data["sharp_ratio_return"], label=exchange)
-            ax[1].plot(
-                exchange_data["year"], exchange_data["sharp_ratio_log_return"], label=exchange
-            )
-
-        ax[0].set_title("Sharp Ratio Return Over Years")
-        ax[0].set_ylabel("Sharp Ratio Return")
-        ax[0].legend()
-
-        ax[1].set_title("Sharp Ratio Log Return Over Years")
-        ax[1].set_xlabel("Year")
-        ax[1].set_ylabel("Sharp Ratio Log Return")
-        ax[1].legend()
-
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.15)  # Add padding at the bottom
-        plt.figtext(
-            0.02,
-            0.05,
-            "Note: Return Sharpe ratio uses annualized daily returns (x252).\n"
-            "Log return Sharpe ratio uses cumulative daily returns.",
-            style="italic",
-            bbox={"facecolor": "yellow", "alpha": 0.2},
-        )
+        fig, ax = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+        sns.lineplot(data=summary, x="year", y="sharp_ratio_return", hue="exchange", ax=ax[0])
+        sns.lineplot(data=summary, x="year", y="sharp_ratio_log_return", hue="exchange", ax=ax[1])
         plt.show()
-        return summary
+
 
     def plot_returns(self) -> pd.DataFrame:
         """
         Plot yearly returns and cumulative log returns for each exchange,
         with standard deviations on secondary axes.
         """
-        _, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
-        exchanges = self.summary["exchange"].unique()
+        fig, ax1 = plt.subplots(figsize=(14, 7))
 
-        # Create twin axes for standard deviations
-        ax1_twin = ax1.twinx()
-        ax2_twin = ax2.twinx()
+        # Plot for return_weighted
+        sns.lineplot(
+            data=self.summary,
+            x="year",
+            y="return_weighted",
+            hue="exchange",
+            ax=ax1,
+            color="blue",
+            alpha=0.6,
+        )
 
-        # Use a color cycle so each exchange has a unique color
-        color_cycle = plt.rcParams["axes.prop_cycle"]()
+        ax2 = ax1.twinx()
+        sns.lineplot(
+            data=self.summary,
+            x="year",
+            y="return_std",
+            hue="exchange",
+            ax=ax2,
+            color="red",
+            marker="o",
+            linestyle="--",
+        )
+        ax2.set_ylabel("Return Std")
+        ax1.set_title("Return Weighted and Std by Year")
+        ax1.set_xlabel("Year")
+        ax1.set_ylabel("Return Weighted")
 
-        for exchange in exchanges:
-            color = next(color_cycle)["color"]
-            exchange_data = self.summary[self.summary["exchange"] == exchange]
+        fig, ax1 = plt.subplots(figsize=(14, 7))
 
-            ax1.plot(
-                exchange_data["year"],
-                exchange_data["return_weighted"],
-                label=f"{exchange} return",
-                color=color,
+        # Plot for return_weighted
+        sns.lineplot(
+            data=self.summary,
+            x="year",
+            y="cumu_log_return",
+            hue="exchange",
+            ax=ax1,
+            color="blue",
+            alpha=0.6,
+        )
+
+        ax2 = ax1.twinx()
+        sns.lineplot(
+            data=self.summary,
+            x="year",
+            y="cumu_log_return_std",
+            hue="exchange",
+            ax=ax2,
+            color="red",
+            marker="o",
+            linestyle="--",
+        )
+        ax2.set_ylabel("Return Std")
+        ax1.set_title("Return Weighted and Std by Year")
+        ax1.set_xlabel("Year")
+        ax1.set_ylabel("Return Weighted")
+    def plot_spread(self):
+        spread=self.market_data.copy()
+
+        plt.figure(figsize=(14, 7))
+        sns.lineplot(
+        data=spread, x="time", y="spread_pct", hue="exchange", palette="tab10", linewidth=0.5
+    )
+    def plot_scenario(self, return_col='log_return_weighted', min_year=2013, jump_threshold=2.0, drift_threshold=0.0005):
+        def analyze_trading_cycles(df, return_col="returns", min_window=5, max_window=252):
+            """
+            Analyze optimal trading cycle windows
+            """
+            windows = np.arange(min_window, max_window, 5)
+            results = []
+
+            for window in windows:
+                # Calculate rolling statistics
+                roll_vol = df[return_col].rolling(window).std()
+                roll_ir = df[return_col].rolling(window).mean() / roll_vol
+
+                # Calculate ACF
+                acf = sm.tsa.stattools.acf(df[return_col].dropna(), nlags=window)[1:]
+
+                # Signal to noise ratio
+                snr = np.abs(np.mean(acf)) / np.std(acf)
+
+                results.append(
+                    {
+                        "window": window,
+                        "vol_stability": roll_vol.std(),
+                        "mean_ir": roll_ir.mean(),
+                        "signal_noise": snr,
+                        "significant_lags": sum(np.abs(acf) > 2 / np.sqrt(len(df))),
+                    }
+                )
+            results_df = pd.DataFrame(results)
+            # Score windows based on metrics
+            results_df["total_score"] = (
+                results_df["mean_ir"].rank()
+                + results_df["signal_noise"].rank()
+                + results_df["significant_lags"].rank()
+                - results_df["vol_stability"].rank()
             )
-            ax1_twin.plot(
-                exchange_data["year"],
-                exchange_data["return_std"],
-                label=f"{exchange} std",
-                color=color,
-                linestyle="--",
-            )
-            ax2.plot(
-                exchange_data["year"],
-                exchange_data["cumu_log_return"],
-                label=f"{exchange} return",
-                color=color,
-            )
-            ax2_twin.plot(
-                exchange_data["year"],
-                exchange_data["cumu_log_return_std"],
-                label=f"{exchange} std",
-                color=color,
-                linestyle="--",
-            )
 
-        ax1.set_title("Annualized Market Returns Over Years")
-        ax1.set_ylabel("Market Return")
-        ax1_twin.set_ylabel("Standard Deviation")
+            return results_df.sort_values("total_score", ascending=False)
+        def detect_scenario(df, return_col, ):
 
-        ax2.set_title("Cumulative Log Returns Over Years")
-        ax2.set_xlabel("Year")
-        ax2.set_ylabel("Cumulative Log Return")
-        ax2_twin.set_ylabel("Standard Deviation")
+            window = analyze_trading_cycles(df, return_col)["window"].values[0]
+            df["rolling_mean"] = df[return_col].rolling(window).mean()
+            df["rolling_std"] = df[return_col].rolling(window).std()
 
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines1_twin, labels1_twin = ax1_twin.get_legend_handles_labels()
-        ax1.legend(lines1 + lines1_twin, labels1 + labels1_twin, loc="upper left")
+            # Detect jumps if absolute change > jump_threshold * rolling_std
+            df["jump"] = (df[return_col] - df["rolling_mean"]).abs() > jump_threshold * df[
+                "rolling_std"
+            ]
 
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        lines2_twin, labels2_twin = ax2_twin.get_legend_handles_labels()
-        ax2.legend(lines2 + lines2_twin, labels2 + labels2_twin, loc="upper left")
+            # Estimate drift by rolling linear regression slope
+            def slope(x):
+                y = x.values
+                x_arr = np.arange(len(y))
+                if len(y) < 2:
+                    return 0
+                slope_ = np.polyfit(x_arr, y, 1)[0]
+                return slope_
 
+            df["rolling_slope"] = df[return_col].rolling(window).apply(slope, raw=False)
+            df["drift"] = df["rolling_slope"].abs() > drift_threshold
+
+            # Classify scenario
+            # 1) Jump: if "jump" is True
+            # 2) Drift: if not jump but "drift" is True
+            # 3) No-drift: otherwise
+            conditions = [df["jump"], ~df["jump"] & df["drift"], ~df["jump"] & ~df["drift"]]
+            scenarios = ["jump", "drift", "no_drift"]
+
+            df["scenario"] = np.select(conditions, scenarios, default="no_drift")
+            return df
+        df = self.market_data[self.market_data["year"] > min_year]
+        out = pd.DataFrame()
+        exchanges = df['exchange'].unique()
+        
+        # Process all exchanges first
+        for i in exchanges:
+            df_exchange = df[df["exchange"] == i].copy()
+            if len(df_exchange) > 0:
+                scenario_data = detect_scenario(df_exchange, return_col)
+                out = pd.concat([out, scenario_data])
+        
+        # Create single figure with subplots
+        fig, axes = plt.subplots(len(exchanges), 1, figsize=(15, 5*len(exchanges)))
+        if len(exchanges) == 1:
+            axes = [axes]
+        
+        colors = {"jump": "red", "drift": "yellow", "no_drift": "green"}
+        
+        for idx, exchange in enumerate(exchanges):
+            exchange_data = out[out["exchange"] == exchange]
+            
+            for scenario in ["no_drift", "drift", "jump"]:
+                mask = exchange_data["scenario"] == scenario
+                axes[idx].scatter(
+                    exchange_data[mask]["time"],
+                    exchange_data[mask]["log_return_weighted"],
+                    c=colors[scenario],
+                    label=scenario,
+                    alpha=0.5,
+                    s=10
+                )
+            
+            axes[idx].set_title(f"Scenarios Over Time - {exchange}")
+            axes[idx].set_ylabel("Log Return")
+            if idx == len(exchanges)-1:
+                axes[idx].set_xlabel("Time")
+            axes[idx].legend(bbox_to_anchor=(1.05, 1))
+        
         plt.tight_layout()
         plt.show()
-        return self.summary

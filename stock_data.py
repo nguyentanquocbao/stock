@@ -47,6 +47,8 @@ def clean_data(data: pd.DataFrame) -> pd.DataFrame:
     df["market_value"] = df["close"] * df["total_outstanding"]
     df["return"] = df.groupby("ticker")["close"].pct_change()
     df["log_return"] = np.log(df["close"] / df.groupby("ticker")["close"].shift(1))
+    if "market_value" not in df.columns:
+        df["market_value"] = 1
     # move this to market function
     # df["market_weight"] = df["market_value"] / df.groupby(["exchange", "time"])[
     #     "market_value"
@@ -100,11 +102,11 @@ class StockData:
 
         stock = vn(show_log=False).stock(symbol="ABC", source=self.dictionary["source"])
         vni = stock.quote.history(
-            symbol="VNINDEX", start="2013-01-01", end="2024-01-02", interval="1D"
+            symbol="VNINDEX", start="2013-01-01", end=get_past_friday(), interval="1D"
         )
         vni["ticker"], vni["exchange"], vni["total_outstanding"] = "vni", "vni", 1
         vn30 = stock.quote.history(
-            symbol="VN30", start="2013-01-01", end="2024-01-02", interval="1D"
+            symbol="VN30", start="2013-01-01", end=get_past_friday(), interval="1D"
         )
         vn30["ticker"], vn30["exchange"], vn30["total_outstanding"] = "vn30", "vn30", 1
         return [
@@ -114,8 +116,11 @@ class StockData:
                     "time",
                     "high",
                     "low",
+                    "return",
                     "close",
+                    "log_return",
                     "volume",
+                    "market_value"
                 ]
             ],
             clean_data(vn30)[
@@ -124,8 +129,11 @@ class StockData:
                     "time",
                     "high",
                     "low",
+                    "return",
+                    "log_return",
                     "close",
                     "volume",
+                    "market_value"
                 ]
             ],
         ]
@@ -298,6 +306,9 @@ class StockData:
             ticker_subset, how="inner", left_on=["ticker"], right_on=[self.dictionary["ticker"]]
         ).copy()
         merged_data = clean_data(merged_data)
+        logging.info("Max time in merged data: %s", merged_data["time"].max())
+        summary = merged_data.groupby("exchange")["ticker"].nunique()
+        logging.info("Summary of tickers by exchange: %s", summary.to_dict())
         return merged_data, self.compute_market_level(merged_data)
 
     def concat_new_and_old(
