@@ -328,7 +328,7 @@ def efficient_frontier_visual(
     plt.show()
 
 
-def adf_test(series: pd.Series, significance_level: float = 0.05):
+def adf_test(series: pd.Series, significance_level: float = 0.05,return_results=False):
     """_summary_
     Args:
         series (series): series data need to be test, series of float
@@ -342,11 +342,13 @@ def adf_test(series: pd.Series, significance_level: float = 0.05):
         p_value = results[1]
         critical_values = results[4]  # type: ignore
         # Print ADF results
-        ic(
-            adf_statistic,
-            p_value,
-            critical_values,
-        )
+        # ic(
+        #     adf_statistic,
+        #     p_value,
+        #     critical_values,
+        # )
+        if return_results:
+            return adf_statistic, p_value, critical_values
         if p_value < significance_level:
             print(
                 "Judgment: The series is likely stationary (Reject null hypothesis)."
@@ -358,7 +360,7 @@ def adf_test(series: pd.Series, significance_level: float = 0.05):
         print("\n" + "=" * 40 + "\n")
 
 
-def kpss_test(series: pd.Series, significance_level=0.05):
+def kpss_test(series: pd.Series, significance_level=0.05,return_results=False):
     """_summary_
     Test for stationary with:
         H0: given series is not stationary
@@ -374,15 +376,14 @@ def kpss_test(series: pd.Series, significance_level=0.05):
         kpss_statistic, p_value, _, critical_values = result
 
         # Print KPSS results
-        ic(
-            kpss_statistic,
-            p_value,
-            critical_values,
-        )
-        # for key, value in critical_values.items():
-        #     print(f"Critical Value ({key}): {value}")
+        # ic(
+        #     kpss_statistic,
+        #     p_value,
+        #     critical_values,
+        # )
 
-        # Make judgment based on p-value
+        if return_results:
+            return kpss_statistic, p_value, critical_values
         if p_value < significance_level:
             print(
                 "Judgment: The series is likely non-stationary (Reject null hypothesis)."
@@ -392,8 +393,45 @@ def kpss_test(series: pd.Series, significance_level=0.05):
                 "Judgment: The series is likely stationary (Fail to reject null hypothesis)."
             )
         print("\n" + "=" * 40 + "\n")
+def test_stationarity(market_winsored):
+    results = []
+    
+    for exchange in market_winsored["ticker"].unique():
+        temp = market_winsored[market_winsored["ticker"] == exchange]["return"]
+        
+        # Run ADF test
+        adf_stat, adf_p, critical_vals = adf_test(temp, 0.01, return_results=True)
+        
+        # Run KPSS test  
+        kpss_stat, kpss_p, kpss_crit = kpss_test(temp, 0.01, return_results=True)
+        
+        results.append({
+            'Exchange': exchange,
+            'ADF_Statistic': adf_stat,
+            'ADF_p_value': adf_p,
+            'ADF_Critical_1%': critical_vals['1%'],
+            'ADF_Critical_5%': critical_vals['5%'],
+            'ADF_Critical_10%': critical_vals['10%'],
+            'ADF_Result': 'Stationary' if adf_p < 0.01 else 'Non-stationary',
+            'KPSS_Statistic': kpss_stat, 
+            'KPSS_p_value': kpss_p,
+            'KPSS_Critical_1%': kpss_crit['1%'],
+            'KPSS_Critical_5%': kpss_crit['5%'],
+            'KPSS_Critical_10%': kpss_crit['10%'],
+            'KPSS_Result': 'Stationary' if kpss_p > 0.01 else 'Non-stationary'
+        })
+            
+    results_df = pd.DataFrame(results)
+    
+    # Format for display
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', None)
+    
 
+    
+    return results_df
 
+# Run the tests
 def calculate_mape(actual: pd.Series, predicted: pd.Series):
     """_summary_
     compute mean absolute percentage error

@@ -25,10 +25,14 @@ To set up the environment to run all of the notebooks, follow these steps:
    ```sh
    git clone https://github.com/nguyentanquocbao/stock_quant.git
    cd stock_quant
-
+   pip install -r requirements.txt 
+    ```
 ## Usage
 - **Use** market_analysis notebook file to get time-series analyses in Vietnamese stock market: including trend analysis, winsorize, stationary test, and simple visualization by SMA, EMA, cumulative log return, and simple AR & ARIMA visualization.
 - **Use** update_data.py to get update and pre-processing data.
 - **Use** AR.py, MA.py, arima.py to get simple market. visualization.
 - **Use** efficient frontier to build portfolio and comparing to market performance..
+- **Use** there will always be 2 version of return: simple daily return and cumulative log return
+    * Yearly return of simple daily return: average daily return * 252
+    * Yearly return of cumulative log return: yearly cumulative return of holding stock for exactly 1 year
 

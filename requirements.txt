@@ -12,3 +12,4 @@ tenacity
 ipykernel
 pyarrow
 fastparquet
+jinja2

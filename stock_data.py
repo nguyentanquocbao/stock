@@ -49,16 +49,6 @@ def clean_data(data: pd.DataFrame) -> pd.DataFrame:
     df["log_return"] = np.log(df["close"] / df.groupby("ticker")["close"].shift(1))
     if "market_value" not in df.columns:
         df["market_value"] = 1
-    # move this to market function
-    # df["market_weight"] = df["market_value"] / df.groupby(["exchange", "time"])[
-    #     "market_value"
-    # ].transform("sum")
-    # df["return_weighted"] = df["market_weight"] * df["return"]
-    # df["log_return_weighted"] = df["market_weight"] * df["log_return"]
-    # df[["return_weighted", "log_return_weighted"]] = df[
-    #     ["return_weighted", "log_return_weighted"]
-    # ].fillna(0)
-
     return df.sort_values(["ticker", "time"])
 
 
@@ -99,7 +89,6 @@ class StockData:
         Returns:
             List[pd.DataFrame]: A list containing two cleaned DataFrames, one for each index.
         """
-
         stock = vn(show_log=False).stock(symbol="ABC", source=self.dictionary["source"])
         vni = stock.quote.history(
             symbol="VNINDEX", start="2013-01-01", end=get_past_friday(), interval="1D"
@@ -358,15 +347,17 @@ class StockData:
         )["market_value"].transform("sum")
 
         cols_to_weight = ["log_return", "return", "high", "low", "close", "volume"]
-        weighted_cols = [f"{col}_weighted" for col in cols_to_weight]
 
         for col in cols_to_weight:
-            all_stock_data[f"{col}_weighted"] = (
+            all_stock_data[col] = (
                 all_stock_data["market_weight"] * all_stock_data[col]
             )
 
         market_data = (
-            all_stock_data.groupby(["exchange", "time"])[weighted_cols].sum().reset_index()
+            all_stock_data.groupby(["exchange", "time"])[cols_to_weight].sum().reset_index()
         )
-
+        market_data['year']=market_data['time'].dt.year
+        market_data['ticker'],market_data['exchange']=market_data['exchange'],'index'
         return market_data
+
+

@@ -220,6 +220,7 @@ def tracking(
 
     all_tracking = []
     all_track_df = []
+    all_weight=pd.DataFrame()
     for i in df["time"].dt.year.unique():
         if i < df["time"].dt.year.max():
             train = df[
@@ -237,6 +238,13 @@ def tracking(
             test = transform_df(test[test["ticker"].isin(train["ticker"].unique())])
             train = transform_df(train)
             result = build_port(train, num_portfolios=num_portfolios + 2, range0=(0, 1))
+            if result is not None:
+                weight = result[:, 3:]
+                ticker_names = train.columns
+                weight_df = pd.DataFrame(weight, columns=ticker_names)
+                weight_df.set_index([pd.Index([i] * len(weight_df), name='year'), weight_df.index], inplace=True)
+                weight_df['year']=i
+            all_weight=pd.concat([all_weight,weight_df],axis=0)
             for port_no, weight in enumerate(result):
                 if weight is not None:
                     train_out = portfolio_statistics(weight[3:], (1 + train).cumprod())
@@ -279,7 +287,7 @@ def tracking(
             "CAL",
         ] = True
 
-    return all_tracking.sort_values(["year", "train_return"]), df0
+    return all_tracking.sort_values(["year", "train_return"]), df0,all_weight
 
 
 def plot_backtest_stategy(df, market_df_stat, num_portfolios=10):
