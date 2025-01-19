@@ -10,11 +10,9 @@ class Tracking(MarketVisualize):
     def __str__(self):
         print("Tracking by Kevin")
     def single_port_summary(self, year_build, rank,return_col,market_selection,keep_period=1):
-        
         df= self.stocks_data.copy()
         stock_weight = self.weight.loc[year_build,rank].copy()
         market=self.market_data[self.market_data['ticker']==market_selection].copy()
-        
         df = df[(df['ticker'].isin(stock_weight.index))
                 & (df['time'].dt.year >= year_build)
                 & (df['time'].dt.year <= year_build+keep_period)]
@@ -31,10 +29,10 @@ class Tracking(MarketVisualize):
         df=df.merge(market[['time','log_return','return']],how='left',on='time',
                                     suffixes=('','_market'))
         def statiscal_sumary(df,return_col='return'):
-            df['cumulative_return']=(df['return']+1).cumprod()
-            df['cumulative_return_market']=(df['return_market']+1).cumprod()
-            df['cumulative_log_return']=(df['log_return']+1).cumsum()
-            df['cumulative_log_return_market']=(df['log_return_market']+1).cumsum()
+            df['cumulative_return']=(df['return']+1).cumprod()-1
+            df['cumulative_return_market']=(df['return_market']+1).cumprod()-1
+            df['cumulative_log_return']=(df['log_return']).cumsum()
+            df['cumulative_log_return_market']=(df['log_return_market']).cumsum()
             # Portfolio statistics
             # Calculate downside returns and other metrics
             period_return =  df[return_col].mean() * 252 * keep_period
@@ -94,7 +92,7 @@ class Tracking(MarketVisualize):
         return df,statiscal_sumary(df,return_col)
     def all_port_summary(self,keep_period,return_col,market_selection='vni',):
         max_year=self.stocks_data['time'].dt.year.max()-keep_period
-        available_ranks = self.weight.index.tolist()
+        available_ranks = self.weight.sort_index().index.tolist()
         all_combinations = [(single[0], single[1]) for single in available_ranks if single[0]<=max_year]
         from joblib import Parallel,delayed
 
